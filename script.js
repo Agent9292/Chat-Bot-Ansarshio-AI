@@ -78,8 +78,10 @@ async function sendMessageToBackendless(userMessage) {
     try {
         const response = await fetch(BACKENDLESS_API_URL, {
             method: 'POST',
+            mode: 'cors',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
             },
             body: JSON.stringify({
                 message: userMessage,
@@ -88,7 +90,8 @@ async function sendMessageToBackendless(userMessage) {
         });
 
         if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
+            const errorText = await response.text();
+            throw new Error(`API error: ${response.status} - ${errorText}`);
         }
 
         const data = await response.json();
@@ -132,7 +135,9 @@ async function handleSendMessage() {
     try {
         const botResponse = await sendMessageToBackendless(message);
         
-        chatContainer.removeChild(loadingDiv);
+        if (loadingDiv.parentNode) {
+            chatContainer.removeChild(loadingDiv);
+        }
         
         addMessageToUI('assistant', botResponse);
         conversationHistory.push({ role: 'assistant', content: botResponse });
@@ -142,7 +147,40 @@ async function handleSendMessage() {
             chatContainer.removeChild(loadingDiv);
         }
         
-        const errorMessage = 'Sorry, something went wrong. Please try again.';
+        let errorMessage = 'Sorry, something went wrong. Please try again.';
+        
+        if (error.message.includes('Failed to fetch')) {
+            errorMessage = 'Network error. Please check your internet connection.';
+        } else if (error.message.includes('CORS')) {
+            errorMessage = 'CORS error. Trying alternative method...';
+            
+            try {
+                const alternativeResponse = await fetch(BACKENDLESS_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        username: USERNAME
+                    })
+                });
+                
+                if (alternativeResponse.ok) {
+                    const data = await alternativeResponse.json();
+                    const botResponse = typeof data === 'string' ? data : 
+                                       data.response || data.message || JSON.stringify(data);
+                    
+                    addMessageToUI('assistant', botResponse);
+                    conversationHistory.push({ role: 'assistant', content: botResponse });
+                    saveConversation();
+                    return;
+                }
+            } catch (altError) {
+                console.error('Alternative method also failed:', altError);
+            }
+        }
+        
         addMessageToUI('assistant', errorMessage);
         conversationHistory.push({ role: 'assistant', content: errorMessage });
         saveConversation();
